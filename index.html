@@ -90,6 +90,15 @@ input[type=text]{font-family:var(--body);font-size:18px;font-weight:700;padding:
 .picktitle{font-weight:900;margin:0;font-size:16px}
 .needs{font-size:14px;margin:0;color:#6b5a3e;font-weight:700}
 .seals{display:flex;flex-wrap:wrap;gap:6px;min-height:30px}
+.answer{margin:0;font-weight:700;color:#6b5a3e}
+.answer b{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.08em;color:var(--paper-ink)}
+.seals.watch{min-height:36px}
+.seals.watch .seal{width:32px;height:32px;font-size:16px}
+.seal.ok{background:#2f8f57;color:#fff}
+.seal.bad{background:#c2333f;color:#fff}
+.seal.empty{background:transparent;border:2px dashed #b8a37a;color:transparent;animation:none}
+.watchnote{margin:0;font-weight:700;font-size:15px;min-height:1.2em}
+.watchnote.ok{color:#1d7a46}.watchnote.bad{color:#b3202f}
 .seal{width:28px;height:28px;border-radius:6px;display:grid;place-items:center;font-weight:900;font-size:14px;animation:sealIn .2s;background:var(--paper-ink);color:var(--paper)}
 @keyframes sealIn{from{transform:scale(.3) rotate(-30deg)}}
 .result{font-size:18px;font-weight:700;margin:0;line-height:1.45}
@@ -215,7 +224,7 @@ const LEVELS = {
   jonin:{label:"Jonin", short:"Jonin", el:"must", double:.4,
     note:"Senior high school. Sometimes two words at once. The wrong element backfires on you."},
   kage:{label:"Kage", short:"Kage", el:"must", double:.6,
-    note:"College level. Two words more often. The wrong element backfires on you."}
+    note:"College level. Two words more often. The wrong element backfires on you, and there's no element chart."}
 };
 const BONUS = 1.5, BACKFIRE = 12, MAX_HP = 100;
 /* Ninja 1 is always MC. Ninja 2's name comes from the level picked. */
@@ -671,7 +680,7 @@ function openHostPeer(code, attempt){
     if(conn && conn!==c){ try{ conn.close(); }catch(e){} }
     conn=c;
     c.on("open",()=>{ notice(""); store.update({seats:{"1":{uid:"guest"}}}); });
-    c.on("data",m=>{ if(m && m.type==="update" && m.patch && typeof m.patch==="object") store.update(m.patch); });
+    c.on("data",m=>{ if(m && m.type==="update" && m.patch && typeof m.patch==="object") store.update(m.patch); else if(m && m.type==="typing") onTyping(m); });
     c.on("close",()=>{ if(conn===c){ conn=null; store.update({seats:{"1":{ready:false}}}); guestGone(); } });
     c.on("error",()=>{});
   });
@@ -705,7 +714,7 @@ async function joinRoom(code){
     const c=p.connect(PEER_PREFIX+code.toLowerCase(), {reliable:true});
     conn=c;
     c.on("open",()=>notice(""));
-    c.on("data",m=>{ if(m && m.type==="doc" && m.data) store.receive(m.data); });
+    c.on("data",m=>{ if(m && m.type==="doc" && m.data) store.receive(m.data); else if(m && m.type==="typing") onTyping(m); });
     c.on("close",()=>{ if(conn===c){ conn=null; notice("Lost the connection to MC's game. Reconnecting…"); retry(); } });
     c.on("error",()=>{});
   }
@@ -1028,7 +1037,8 @@ function drawArena(d){
   });
   const sh = d.phase==="spelling" && d.cur ? d.cur.shield : null;
   setShield(sh ? 1-d.turn : null, sh);
-  $("cycleGame").hidden = !sh;
+  /* Kage ninjas get no element chart: they have to know it by heart */
+  $("cycleGame").hidden = !sh || d.seats[String(d.turn)].lvl==="kage";
 }
 
 function resultHTML(L,d){
@@ -1099,12 +1109,21 @@ function renderGame(d){
     if(me && !readOnly) showSpelling(d);
     else {
       spell=null; showKb(false);
-      const sh=d.cur.shield;
+      const sh=d.cur.shield, items=d.cur.items;
       panel.innerHTML = `
-        <p class="jutsu">${LEVELS[p.lvl].label} level${d.cur.items.length>1?" · double jutsu":""}</p>
+        <p class="jutsu">${LEVELS[p.lvl].label}${items.length>1?" · double jutsu":""} · watching live</p>
         <p class="who">${name} is charging a jutsu…</p>
-        <p class="sentence">${d.cur.items.length>1?`${name} has to spell two words this time.`:`${name} is spelling a word.`}
-        ${sh?` Your <span style="color:${ELEMENTS[sh].c};text-shadow:0 1px 0 #2b2216">${ELEMENTS[sh].label}</span> shield is up.`:""}</p>`;
+        ${sh?`<p class="sentence">Your <span style="color:${ELEMENTS[sh].c};text-shadow:0 1px 0 #2b2216">${ELEMENTS[sh].label}</span> shield is up.
+          <span id="watchEl">${name} hasn't picked an element yet.</span></p>`:""}
+        ${items.map((it,k)=>`<div class="wordbox">
+          ${items.length>1?`<p class="jutsu">Word ${k+1} of ${items.length}</p>`:""}
+          <p class="sentence">${esc(it.s)}</p>
+          <p class="answer">Answer: <b>${esc(it.w)}</b></p>
+          <div class="seals watch" id="watch${k}" aria-live="polite"><span class="hint">Waiting for ${name} to type…</span></div>
+          <p class="watchnote" id="watchNote${k}"></p>
+        </div>`).join("")}
+        <p class="hint" id="watchPeek" hidden>${name} peeked, so this jutsu is at half power.</p>`;
+      paintWatch();
     }
   }
   panel.querySelectorAll("[data-say]").forEach(b=>b.onclick=()=>speak(b.dataset.say));
@@ -1172,7 +1191,7 @@ function showSpelling(d){
     const g=$("elPick");
     g.addEventListener("click",e=>{
       const b=e.target.closest(".chip"); if(!b) return;
-      spell.picked=b.dataset.v;
+      spell.picked=b.dataset.v; sendTyping();
       g.querySelectorAll(".chip").forEach(c=>c.setAttribute("aria-pressed",c===b));
       tone(660,.08,"triangle",0,.08);
     });
@@ -1185,6 +1204,7 @@ function showSpelling(d){
       if(letters.length>s.children.length) sfx.seal();
       const col = spell.picked ? ELEMENTS[spell.picked].c : p.color;
       s.innerHTML=[...letters].map(ch=>`<span class="seal" style="background:${col};color:#0c1024">${esc(ch.toUpperCase())}</span>`).join("");
+      sendTyping();
     });
     inp.addEventListener("keydown",e=>{ if(e.key==="Enter") submitField(k); });
     inp.addEventListener("focus",()=>setActive(k));
@@ -1195,7 +1215,7 @@ function showSpelling(d){
   panel.querySelectorAll("[data-hear]").forEach(b=>b.onclick=()=>speak(items[+b.dataset.hear].w));
   panel.querySelectorAll("[data-sent]").forEach(b=>b.onclick=()=>speak(items[+b.dataset.sent].s,.9));
   panel.querySelectorAll("[data-peek]").forEach(b=>b.onclick=()=>{
-    const k=+b.dataset.peek; spell.peeked=true; b.disabled=true;
+    const k=+b.dataset.peek; spell.peeked=true; b.disabled=true; sendTyping();
     const out=$("peekOut"+k);
     out.innerHTML=`<p class="peeked">${esc(items[k].w)}</p>`;
     setTimeout(()=>{out.innerHTML=`<p class="hint">The word vanished. Now spell it from memory.</p>`},1600);
@@ -1293,6 +1313,56 @@ function renderWin(d){
     $("rematch").onclick=()=>write(freshMatch());
     $("changeSetup").onclick=()=>write({status:"lobby", seats:{"0":{ready:false},"1":{ready:false}}});
   }
+}
+
+/* ---------- live view of the other player's spelling ---------- */
+let lastTyping=null, typingTimer=null;
+function sendTyping(){
+  if(mode!=="online" || !spell || !linkUp()) return;
+  clearTimeout(typingTimer);
+  typingTimer=setTimeout(()=>{
+    if(!spell || !linkUp()) return;
+    try{ conn.send({type:"typing", id:spell.id,
+      answers:spell.items.map((_,k)=>{ const el=$("answer"+k); return el ? el.value.slice(0,24) : ""; }),
+      picked:spell.picked||null, peeked:!!spell.peeked}); }catch(e){}
+  }, 40);
+}
+function onTyping(m){
+  if(!m || typeof m.id!=="string" || !Array.isArray(m.answers)) return;
+  lastTyping=m;
+  paintWatch();
+}
+function paintWatch(){
+  const d=latest;
+  if(!d || d.phase!=="spelling" || !d.cur || mine(d.turn)) return;
+  const t = lastTyping && lastTyping.id===d.cur.id ? lastTyping : null;
+  const name=esc(seatName(d,d.turn));
+  d.cur.items.forEach((it,k)=>{
+    const box=$("watch"+k), note=$("watchNote"+k); if(!box) return;
+    const typed=t ? String(t.answers[k]||"").replace(/\s/g,"") : "";
+    const target=it.w.toLowerCase();
+    let html="", allOk=true;
+    [...typed].forEach((ch,j)=>{
+      const ok = target[j]===ch.toLowerCase(); if(!ok) allOk=false;
+      html+=`<span class="seal ${ok?"ok":"bad"}">${esc(ch.toUpperCase())}</span>`;
+    });
+    for(let j=typed.length;j<target.length;j++) html+=`<span class="seal empty">·</span>`;
+    box.innerHTML = typed || t ? html : `<span class="hint">Waiting for ${name} to type…</span>`;
+    if(!note) return;
+    if(!typed){ note.textContent=""; note.className="watchnote"; }
+    else if(!allOk || typed.length>target.length){ note.textContent="Uh oh, that's not right so far."; note.className="watchnote bad"; }
+    else if(typed.length===target.length){ note.textContent="Spelled right! Brace yourself."; note.className="watchnote ok"; }
+    else { note.textContent="On track so far…"; note.className="watchnote ok"; }
+  });
+  const we=$("watchEl");
+  if(we && d.cur.shield){
+    if(t && t.picked && ELEMENTS[t.picked]){
+      const good = t.picked===counterOf(d.cur.shield);
+      const viewerKage = d.seats[String(1-d.turn)].lvl==="kage";
+      we.innerHTML=`${name} picked <b style="color:${ELEMENTS[t.picked].c};text-shadow:0 1px 0 #2b2216">${ELEMENTS[t.picked].label}</b>.${viewerKage?"":(good?" That beats your shield!":" That doesn't beat your shield.")}`;
+    } else we.textContent=`${name} hasn't picked an element yet.`;
+  }
+  const wp=$("watchPeek"); if(wp) wp.hidden=!(t && t.peeked);
 }
 
 /* ---------- QR code for joining ---------- */
