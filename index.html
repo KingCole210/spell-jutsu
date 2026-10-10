@@ -124,6 +124,9 @@ button{touch-action:manipulation}
 .kb button.go{background:var(--persimmon);color:var(--ink)}
 .wrap{padding-bottom:120px}
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.topbtns{display:flex;gap:8px;flex-wrap:wrap}
+.confirmbar{background:var(--night-2);border-left:4px solid var(--persimmon);border-radius:8px;padding:12px 14px;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-weight:700}
+.confirmbar span{flex:1 1 220px}
 .top{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;justify-content:space-between}
 .titles{min-width:0;flex:1 1 280px}
 .sharebox{background:var(--night-2);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
@@ -160,8 +163,14 @@ hr.cut{border:0;border-top:2px dashed #d4bf92;margin:2px 0;width:100%}
       <h1>Spell Jutsu <span>Duel</span></h1>
       <p class="tag">Hear the word. Spell it right and your jutsu strikes. Miss one letter and it fizzles.</p>
     </div>
-    <button class="ghost small" id="shareBtn" aria-expanded="false" aria-controls="sharePanel">📲 Share</button>
+    <div class="topbtns"><button class="ghost small" id="homeBtn" hidden>🏠 Main menu</button><button class="ghost small" id="shareBtn" aria-expanded="false" aria-controls="sharePanel">📲 Share</button></div>
   </header>
+  <div class="confirmbar" id="homeConfirm" hidden>
+    <span id="homeConfirmText">Leave this duel and go to the main menu?</span>
+    <button id="homeYes">Yes, main menu</button>
+    <button class="ghost" id="homeNo">Stay</button>
+  </div>
+
   <div class="sharebox" id="sharePanel" hidden>
     <p class="share-t">Send this link. Tapping it opens the game in any phone or computer browser.</p>
     <div class="row">
@@ -680,7 +689,7 @@ function openHostPeer(code, attempt){
     if(conn && conn!==c){ try{ conn.close(); }catch(e){} }
     conn=c;
     c.on("open",()=>{ notice(""); store.update({seats:{"1":{uid:"guest"}}}); });
-    c.on("data",m=>{ if(m && m.type==="update" && m.patch && typeof m.patch==="object") store.update(m.patch); else if(m && m.type==="typing") onTyping(m); });
+    c.on("data",m=>{ if(m && m.type==="update" && m.patch && typeof m.patch==="object") store.update(m.patch); else if(m && m.type==="typing") onTyping(m); else if(m && m.type==="bye"){ if(conn===c){ conn=null; store.update({seats:{"1":{ready:false}}}); guestGone(); } try{ c.close(); }catch(e){} } });
     c.on("close",()=>{ if(conn===c){ conn=null; store.update({seats:{"1":{ready:false}}}); guestGone(); } });
     c.on("error",()=>{});
   });
@@ -694,9 +703,14 @@ function openHostPeer(code, attempt){
     else if(NET_ERRORS.includes(e.type)) notice("Can't reach the game server. Check your internet connection.");
   });
 }
+function hostLeft(){
+  const nm = latest ? seatName(latest,0) : "The host";
+  renderHome();
+  notice(`${nm} closed the game room. Make your own room, or join again when they open a new one.`);
+}
 function guestGone(){
   const nm = latest ? seatName(latest,1) : "Your opponent";
-  notice(`${nm} left the game. They can tap your link again to come back.`);
+  notice(`${nm} left the game. They can scan your code or tap your link again to come back.`);
   if(latest && latest.status==="lobby") render();
 }
 
@@ -714,7 +728,7 @@ async function joinRoom(code){
     const c=p.connect(PEER_PREFIX+code.toLowerCase(), {reliable:true});
     conn=c;
     c.on("open",()=>notice(""));
-    c.on("data",m=>{ if(m && m.type==="doc" && m.data) store.receive(m.data); else if(m && m.type==="typing") onTyping(m); });
+    c.on("data",m=>{ if(m && m.type==="doc" && m.data) store.receive(m.data); else if(m && m.type==="typing") onTyping(m); else if(m && m.type==="bye"){ hostLeft(); } });
     c.on("close",()=>{ if(conn===c){ conn=null; notice("Lost the connection to MC's game. Reconnecting…"); retry(); } });
     c.on("error",()=>{});
   }
@@ -762,6 +776,8 @@ function onDoc(d){
 }
 
 function renderHome(){
+  if(linkUp()){ try{ conn.send({type:"bye"}); }catch(e){} }
+  $("homeConfirm").hidden=true;
   closePeer();
   if(unsub){ unsub(); unsub=null; }
   mode=null; latest=null; roomCode=null; isHost=false;
@@ -1373,6 +1389,22 @@ function drawQR(url){
   try{ new QRCode(box,{text:url,width:152,height:152,colorDark:"#0c1024",colorLight:"#ffffff",correctLevel:QRCode.CorrectLevel.M}); }
   catch(e){ box.hidden=true; }
 }
+
+/* ---------- main menu button (on every screen) ---------- */
+function updateHomeBtn(){ $("homeBtn").hidden = mode===null; }
+$("homeBtn").onclick=()=>{
+  const inDuel = latest && latest.status==="playing";
+  const online = mode==="online";
+  if(!inDuel && !online){ return renderHome(); }
+  $("homeConfirmText").textContent = inDuel
+    ? (online ? "Leave this duel and go to the main menu? The other player will be told you left." : "Quit this duel and go to the main menu?")
+    : (isHost ? "Close your game room and go to the main menu?" : "Leave this game room and go to the main menu?");
+  $("homeConfirm").hidden=false;
+  $("homeYes").focus();
+};
+$("homeYes").onclick=()=>{ unlockAudio(); renderHome(); };
+$("homeNo").onclick=()=>{ $("homeConfirm").hidden=true; };
+setInterval(updateHomeBtn, 400);
 
 /* ---------- share ---------- */
 async function shareLink(url, text){
