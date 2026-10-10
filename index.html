@@ -145,6 +145,20 @@ button{touch-action:manipulation}
 .codein{text-transform:uppercase;letter-spacing:.2em;flex:1;min-width:0}
 .readybtn{width:100%;padding:14px;font-size:17px}
 .pcard.is-ready{box-shadow:inset 0 0 0 3px var(--good,#5fd38d)}
+.livecard{grid-column:1/-1}
+.liveroom{display:flex;gap:12px;align-items:center;justify-content:space-between;padding:10px 0;border-top:1px solid var(--ink)}
+.liveroom:first-child{border-top:0}
+.liveinfo{display:flex;flex-direction:column;gap:2px;min-width:0}
+.liveinfo b{font-size:17px}
+.opencard{border:2px dashed var(--muted);background:transparent}
+.check{display:flex;gap:8px;align-items:center;font-weight:700;color:var(--muted);font-size:14px}
+.check input{width:20px;height:20px;accent-color:var(--persimmon)}
+.crowd{background:var(--night-2);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.crowd h3{font-family:var(--display);font-weight:400;font-size:18px;margin:0}
+.crowdcols{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.crowd .t{font-size:13px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:700}
+.line{margin:6px 0 0;padding-left:22px;font-weight:700}
+.line li.me{color:var(--persimmon)}
 .notice{background:var(--night-2);border-left:4px solid var(--persimmon);border-radius:8px;padding:12px 14px;margin:0;font-weight:700;line-height:1.4}
 .seatline{display:flex;flex-wrap:wrap;gap:10px;align-items:center;min-height:40px}
 .you{color:var(--good,#5fd38d);font-weight:900}
@@ -207,6 +221,7 @@ hr.cut{border:0;border-top:2px dashed #d4bf92;margin:2px 0;width:100%}
   </section>
 
   <section id="winView" class="win" hidden></section>
+  <section id="crowd" class="crowd" hidden aria-label="Room"></section>
 </div>
 <div class="kb" id="kb" hidden aria-label="Letter keyboard"></div>
 
@@ -574,11 +589,14 @@ const rid = () => Math.random().toString(36).slice(2,10);
 const freshStats = () => ({hits:0,fizzles:0,bonus:0,backfires:0,missed:[]});
 function freshMatch(){ return {status:"playing", hp:{"0":MAX_HP,"1":MAX_HP}, turn:0, phase:"ready", cur:null, last:null, winner:null, stats:{"0":freshStats(),"1":freshStats()}}; }
 function freshDoc(uid){ return {...freshMatch(), status:"lobby", seats:{
-  "0":{uid:uid||null, color:BAND_COLORS[0], lvl:"jonin", name:"", ready:false},
-  "1":{uid:uid||null, color:BAND_COLORS[1], lvl:"academy", name:"", ready:false}}}; }
+  "0":{uid:uid||null, color:BAND_COLORS[0], lvl:"jonin", name:"", ready:false, again:null, away:false},
+  "1":{uid:uid||null, color:BAND_COLORS[1], lvl:"academy", name:"", ready:false, again:null, away:false}},
+  queue:[], people:{}}; }
 /* Ninja 2 can type a name; blank means the level name (Ant, Drew or Ri). */
 const cleanName = n => String(n||"").replace(/\s+/g," ").trim().slice(0,14);
-const seatName = (d,i) => cleanName(d.seats[String(i)].name) || (i===0 ? "MC" : LEVEL_NAMES[d.seats["1"].lvl]);
+/* a blank name falls back to MC for the host (or player 1 on one device), else the rank name */
+const seatFallback = (d,i) => { const s=d.seats[String(i)]; return (s.uid==="host" || (s.uid==="local" && i===0)) ? "MC" : LEVEL_NAMES[s.lvl]; };
+const seatName = (d,i) => cleanName(d.seats[String(i)].name) || seatFallback(d,i);
 
 /* ---------- storage + online rooms (direct device-to-device, no accounts) ---------- */
 function mergeInto(a,b){ for(const k in b){ const v=b[k];
@@ -629,16 +647,41 @@ const SAVE_KEY="spelljutsu-host-room";
 function saveHost(){ try{ localStorage.setItem(SAVE_KEY, JSON.stringify({code:roomCode, doc:store.peek()})); }catch(e){} }
 function loadHost(){ try{ return JSON.parse(localStorage.getItem(SAVE_KEY)||"null"); }catch(e){ return null; } }
 
+/* ---------- online rooms: the host's device runs the room ----------
+   Two seats play; everyone else watches. Watchers can "call next" to get in line.
+   After a duel each player picks Rematch or I'm done; I'm done hands the seat
+   to the next person in line. */
+const CID_KEY="spelljutsu-cid";
+const myCid=(()=>{ try{ let c=localStorage.getItem(CID_KEY); if(!c){ c="c"+rid()+rid(); localStorage.setItem(CID_KEY,c); } return c; }catch(e){ return "c"+rid()+rid(); } })();
+const NEXTNAME_KEY="spelljutsu-my-name";
+function myName(){ try{ return localStorage.getItem(NEXTNAME_KEY)||""; }catch(e){ return ""; } }
+function rememberMyName(n){ try{ localStorage.setItem(NEXTNAME_KEY,n); }catch(e){} }
+
+let clients=new Map();           /* host only: peer connection -> client id */
+let beacon=null;                 /* host only: makes the room show in Live games */
+const LIVE_PREFIX="spelljutsu-live-", LIVE_SLOTS=12;
+const PUBLIC_KEY="spelljutsu-public";
+function isPublicPref(){ try{ return localStorage.getItem(PUBLIC_KEY)!=="no"; }catch(e){ return true; } }
+function setPublicPref(v){ try{ localStorage.setItem(PUBLIC_KEY, v?"yes":"no"); }catch(e){} }
+
+function openConns(){ return [...clients.keys()].filter(c=>c.open); }
+function broadcast(msg, except){ openConns().forEach(c=>{ if(c!==except){ try{ c.send(msg); }catch(e){} } }); }
+function connOf(uid){ for(const [c,id] of clients) if(id===uid && c.open) return c; return null; }
+const seatIdx = (d,uid) => d.seats["0"].uid===uid ? 0 : d.seats["1"].uid===uid ? 1 : -1;
+const seatOpen = s => !s.uid;
+const onlineNow = uid => uid==="host" || !!connOf(uid);
+
 function makeHostStore(initial){
   let data=clone(initial); const subs=new Set();
   const snap=()=>({exists:true, data:()=>clone(data)});
   const push=()=>{
     setTimeout(()=>subs.forEach(f=>f(snap())));
-    if(linkUp()){ try{ conn.send({type:"doc", data}); }catch(e){} }
+    broadcast({type:"doc", data});
     saveHost();
   };
   return {
     peek:()=>data, push,
+    mutate(fn){ fn(data); push(); },
     update: async p=>{ data=mergeInto(data,p); push(); },
     onSnapshot(f){ subs.add(f); setTimeout(()=>f(snap())); return ()=>subs.delete(f); }
   };
@@ -653,27 +696,141 @@ function makeGuestStore(){
   };
 }
 
+/* ---- room rules, run on the host ---- */
+function blankSeat(color, lvl){ return {uid:null, name:"", color, lvl, ready:false, again:null, away:false}; }
+function freeColor(d, i){ const other=d.seats[String(1-i)].color; return BAND_COLORS.find(c=>c!==other) || BAND_COLORS[0]; }
+function fillSeat(d, i){
+  const k=String(i), old=d.seats[k];
+  d.queue = (d.queue||[]).filter(u=>onlineNow(u) && seatIdx(d,u)<0);
+  const uid = d.queue.shift() || null;
+  const s = blankSeat(old.color===d.seats[String(1-i)].color ? freeColor(d,i) : old.color, "academy");
+  if(uid){ s.uid=uid; s.name=cleanName((d.people[uid]||{}).name); }
+  d.seats[k]=s;
+}
+function toLobby(d){
+  d.status="lobby"; d.phase="ready"; d.cur=null;
+  ["0","1"].forEach(k=>{ d.seats[k].ready=false; d.seats[k].again=null; });
+}
+function hostAct(uid, a){
+  if(!a || typeof a!=="object" || !store || !store.mutate) return;
+  store.mutate(d=>{
+    d.queue=d.queue||[]; d.people=d.people||{};
+    const mineAt=seatIdx(d,uid);
+    if(a.kind==="next"){
+      const nm=cleanName(a.name);
+      d.people[uid]={...(d.people[uid]||{}), name:nm};
+      if(mineAt<0 && !d.queue.includes(uid)) d.queue.push(uid);
+      /* an empty seat outside a duel goes straight to the first in line */
+      [0,1].forEach(i=>{ if(seatOpen(d.seats[String(i)]) && d.status!=="playing" && d.queue.length){ fillSeat(d,i); toLobby(d); } });
+    }
+    else if(a.kind==="unnext"){ d.queue=d.queue.filter(u=>u!==uid); }
+    else if(a.kind==="sit"){
+      if(mineAt>=0) return;
+      const i=[0,1].find(j=>{ const s=d.seats[String(j)]; return seatOpen(s) || (s.away && !onlineNow(s.uid)); });
+      if(i===undefined) return;
+      if(d.queue.length && d.queue[0]!==uid && seatOpen(d.seats[String(i)])) return; /* line goes first */
+      d.queue=d.queue.filter(u=>u!==uid);
+      const s=blankSeat(d.seats[String(i)].color, "academy"); s.uid=uid; s.name=cleanName((d.people[uid]||{}).name);
+      if(s.color===d.seats[String(1-i)].color) s.color=freeColor(d,i);
+      d.seats[String(i)]=s;
+      toLobby(d);
+    }
+    else if(a.kind==="again" && mineAt>=0 && d.status==="over"){
+      const me=d.seats[String(mineAt)];
+      if(a.v){
+        me.again=true;
+        const other=d.seats[String(1-mineAt)];
+        if(other.uid && other.again===true){
+          Object.assign(d, freshMatch());
+          ["0","1"].forEach(k=>{ d.seats[k].again=null; d.seats[k].ready=false; });
+        }
+      } else {
+        fillSeat(d, mineAt);
+        toLobby(d);
+      }
+    }
+    else if(a.kind==="stepout" && mineAt>=0 && d.status!=="playing"){
+      fillSeat(d, mineAt); toLobby(d);
+    }
+  });
+}
+/* send a room action: the host runs it, everyone else asks the host */
+function act(a){
+  if(mode!=="online") return;
+  if(isHost) return hostAct(myId, a);
+  if(!linkUp()) return notice("Not connected to the room right now. Reconnecting…");
+  try{ conn.send({type:"act", action:a}); }catch(e){}
+}
+
+function clientJoined(c, cid){
+  clients.set(c, cid);
+  store.mutate(d=>{
+    d.people=d.people||{}; d.queue=d.queue||[];
+    d.people[cid]={name:cleanName((d.people[cid]||{}).name), on:true};
+    const at=seatIdx(d,cid);
+    if(at>=0){ d.seats[String(at)].away=false; return; }          /* a player coming back */
+    const i=[0,1].find(j=>seatOpen(d.seats[String(j)]));
+    if(i!==undefined && !d.queue.length && d.status!=="playing"){ /* first one in gets the open seat */
+      const s=blankSeat(d.seats[String(i)].color, d.seats[String(i)].lvl); s.uid=cid;
+      if(s.color===d.seats[String(1-i)].color) s.color=freeColor(d,i);
+      d.seats[String(i)]=s; toLobby(d);
+    }
+  });
+  notice("");
+}
+function clientLeft(c){
+  const cid=clients.get(c); if(cid===undefined) return;
+  clients.delete(c);
+  if(connOf(cid)) return;                                       /* still connected on another link */
+  store.mutate(d=>{
+    d.queue=(d.queue||[]).filter(u=>u!==cid);
+    const at=seatIdx(d,cid);
+    if(d.people && d.people[cid]){ if(at>=0) d.people[cid].on=false; else delete d.people[cid]; }
+    if(at<0) return;
+    if(d.status==="playing"){ d.seats[String(at)].away=true; d.seats[String(at)].ready=false; }
+    else { fillSeat(d, at); toLobby(d); }
+  });
+  const d=store.peek(), name=cleanName((d.people[cid]||{}).name);
+  if(seatIdx(d,cid)>=0) notice(`${name||"Your opponent"} lost connection. They can rejoin with the same link, or a watcher can take their seat.`);
+}
+function roomInfo(){
+  const d=store.peek(), hostAt=seatIdx(d,"host");
+  const open=[0,1].some(i=>seatOpen(d.seats[String(i)]));
+  return {type:"info", code:roomCode, host: hostAt>=0 ? seatName(d,hostAt) : (cleanName((d.people.host||{}).name)||"MC"),
+    rank: hostAt>=0 ? LEVELS[d.seats[String(hostAt)].lvl].label : "",
+    open, line:(d.queue||[]).length, watching: watcherIds(d).length, status:d.status};
+}
+function watcherIds(d){
+  const ppl=d.people||{};
+  return Object.keys(ppl).filter(u=>ppl[u] && ppl[u].on!==false && seatIdx(d,u)<0);
+}
+
 const NET_ERRORS=["network","server-error","socket-error","socket-closed","browser-incompatible"];
 async function peerReady(){
   for(let i=0;i<80 && typeof window.Peer!=="function";i++) await new Promise(r=>setTimeout(r,100));
   return typeof window.Peer==="function";
 }
 function closePeer(){
-  clearTimeout(retryTimer);
+  clearTimeout(retryTimer); stopScan();
   try{ conn && conn.close(); }catch(e){}
+  for(const c of clients.keys()){ try{ c.close(); }catch(e){} }
   try{ peer && peer.destroy(); }catch(e){}
-  peer=null; conn=null;
+  try{ beacon && beacon.destroy(); }catch(e){}
+  peer=null; conn=null; beacon=null; clients=new Map();
 }
 function keepAlive(p){
-  p.on("disconnected",()=>{ setTimeout(()=>{ try{ if(peer===p && !p.destroyed) p.reconnect(); }catch(e){} },2000); });
+  p.on("disconnected",()=>{ setTimeout(()=>{ try{ if(!p.destroyed) p.reconnect(); }catch(e){} },2000); });
 }
 
 async function hostRoom(code, savedDoc){
   closePeer();
   mode="online"; isHost=true; myId="host"; roomCode=code; readOnly=false;
   const doc = savedDoc ? clone(savedDoc) : freshDoc(null);
-  ["0","1"].forEach(k=>{ doc.seats[k].lvl=normLvl(doc.seats[k].lvl); });
-  doc.seats["0"].uid="host";
+  ["0","1"].forEach(k=>{ const s=doc.seats[k]; s.lvl=normLvl(s.lvl); if(s.again===undefined) s.again=null; s.away=false; });
+  doc.queue=[]; doc.people={host:{name:"", on:true}};
+  if(seatIdx(doc,"host")<0 && !doc.seats["0"].uid) doc.seats["0"].uid="host";
+  ["0","1"].forEach(k=>{ const u=doc.seats[k].uid; if(u && u!=="host"){ doc.seats[k].away=true; doc.seats[k].ready=false; } });
+  if(doc.status!=="playing") ["0","1"].forEach(k=>{ const s=doc.seats[k]; if(s.uid && s.uid!=="host"){ doc.seats[k]=blankSeat(s.color, s.lvl); } });
   store=makeHostStore(doc); saveHost();
   setUrl(roomLink(code));
   subscribe();
@@ -684,13 +841,22 @@ function openHostPeer(code, attempt){
   if(!isHost || roomCode!==code) return;
   const p = peer = new Peer(PEER_PREFIX+code.toLowerCase(), {debug:0});
   keepAlive(p);
-  p.on("open",()=>{ notice(""); if(latest && latest.status==="lobby") render(); });
+  p.on("open",()=>{ notice(""); if(isPublicPref()) openBeacon(1); if(latest) render(); });
   p.on("connection",c=>{
-    if(conn && conn!==c){ try{ conn.close(); }catch(e){} }
-    conn=c;
-    c.on("open",()=>{ notice(""); store.update({seats:{"1":{uid:"guest"}}}); });
-    c.on("data",m=>{ if(m && m.type==="update" && m.patch && typeof m.patch==="object") store.update(m.patch); else if(m && m.type==="typing") onTyping(m); else if(m && m.type==="bye"){ if(conn===c){ conn=null; store.update({seats:{"1":{ready:false}}}); guestGone(); } try{ c.close(); }catch(e){} } });
-    c.on("close",()=>{ if(conn===c){ conn=null; store.update({seats:{"1":{ready:false}}}); guestGone(); } });
+    let joined=false;
+    const fallback=setTimeout(()=>{ if(!joined && c.open){ joined=true; clientJoined(c, "anon"+rid()); } }, 2500);
+    c.on("data",m=>{
+      if(!m || typeof m!=="object") return;
+      if(m.type==="hello"){ if(joined) return; joined=true; clearTimeout(fallback);
+        clientJoined(c, typeof m.cid==="string" && /^[a-z0-9]{4,40}$/i.test(m.cid) && m.cid!=="host" ? m.cid : "anon"+rid()); return; }
+      const cid=clients.get(c); if(cid===undefined) return;
+      const d=store.peek(), at=seatIdx(d,cid);
+      if(m.type==="update" && at>=0 && m.patch && typeof m.patch==="object") store.update(m.patch);
+      else if(m.type==="typing" && at>=0 && at===d.turn){ onTyping(m); broadcast(m, c); }
+      else if(m.type==="act") hostAct(cid, m.action);
+      else if(m.type==="bye"){ clientLeft(c); try{ c.close(); }catch(e){} }
+    });
+    c.on("close",()=>{ clearTimeout(fallback); clientLeft(c); });
     c.on("error",()=>{});
   });
   p.on("error",e=>{
@@ -703,21 +869,34 @@ function openHostPeer(code, attempt){
     else if(NET_ERRORS.includes(e.type)) notice("Can't reach the game server. Check your internet connection.");
   });
 }
-function hostLeft(){
-  const nm = latest ? seatName(latest,0) : "The host";
-  renderHome();
-  notice(`${nm} closed the game room. Make your own room, or join again when they open a new one.`);
+function openBeacon(slot){
+  if(!isHost || slot>LIVE_SLOTS || (beacon && !beacon.destroyed)) return;
+  const b = beacon = new Peer(LIVE_PREFIX+slot, {debug:0});
+  b.on("connection",c=>{
+    c.on("open",()=>{ try{ c.send(roomInfo()); }catch(e){} setTimeout(()=>{ try{ c.close(); }catch(e){} },1500); });
+    c.on("error",()=>{});
+  });
+  b.on("error",e=>{ if(e.type==="unavailable-id"){ try{ b.destroy(); }catch(x){} if(beacon===b){ beacon=null; openBeacon(slot+1); } } });
+  b.on("disconnected",()=>{ setTimeout(()=>{ try{ if(beacon===b && !b.destroyed) b.reconnect(); }catch(e){} },2000); });
 }
-function guestGone(){
-  const nm = latest ? seatName(latest,1) : "Your opponent";
-  notice(`${nm} left the game. They can scan your code or tap your link again to come back.`);
-  if(latest && latest.status==="lobby") render();
+function setPublic(v){
+  setPublicPref(v);
+  if(!isHost) return;
+  if(v) openBeacon(1);
+  else { try{ beacon && beacon.destroy(); }catch(e){} beacon=null; }
+}
+function hostLeft(){
+  const d=latest, at=d?seatIdx(d,"host"):-1;
+  const nm = at>=0 ? seatName(d,at) : "The host";
+  renderHome();
+  notice(`${nm} closed the game room. Make your own room, or join another one from Live games.`);
 }
 
 async function joinRoom(code){
   closePeer();
-  mode="online"; isHost=false; myId="guest"; roomCode=code; readOnly=false;
+  mode="online"; isHost=false; myId=myCid; roomCode=code; readOnly=false;
   store=makeGuestStore(); subscribe();
+  setUrl(roomLink(code));
   renderJoining(code);
   if(!(await peerReady())) return notice("Online play couldn't load. Check your internet connection and reload the page.");
   const p = peer = new Peer({debug:0});
@@ -727,25 +906,118 @@ async function joinRoom(code){
     if(peer!==p || p.destroyed) return;
     const c=p.connect(PEER_PREFIX+code.toLowerCase(), {reliable:true});
     conn=c;
-    c.on("open",()=>notice(""));
-    c.on("data",m=>{ if(m && m.type==="doc" && m.data) store.receive(m.data); else if(m && m.type==="typing") onTyping(m); else if(m && m.type==="bye"){ hostLeft(); } });
-    c.on("close",()=>{ if(conn===c){ conn=null; notice("Lost the connection to MC's game. Reconnecting…"); retry(); } });
+    c.on("open",()=>{ notice(""); try{ c.send({type:"hello", cid:myCid}); }catch(e){} });
+    c.on("data",m=>{
+      if(!m || typeof m!=="object") return;
+      if(m.type==="doc" && m.data) store.receive(m.data);
+      else if(m.type==="typing") onTyping(m);
+      else if(m.type==="bye") hostLeft();
+    });
+    c.on("close",()=>{ if(conn===c){ conn=null; notice("Lost the connection to the room. Reconnecting…"); retry(); } });
     c.on("error",()=>{});
   }
   p.on("open",connect);
   p.on("error",e=>{
-    if(e.type==="peer-unavailable"){ conn=null; notice(`Can't find game ${code} yet. MC needs to have the game open. Trying again…`); retry(); }
+    if(e.type==="peer-unavailable"){ conn=null; notice(`Can't find room ${code} yet. The host needs to have the game open. Trying again…`); retry(); }
     else if(NET_ERRORS.includes(e.type)) notice("Can't reach the game server. Check your internet connection.");
   });
 }
 function renderJoining(code){
   $("setupView").hidden=false; $("gameView").hidden=true; $("winView").hidden=true;
-  $("roomBox").innerHTML="";
-  $("setupCards").innerHTML=`<div class="pcard"><h2>Joining game ${esc(code)}…</h2>
-    <p class="lvl-note">Connecting to MC's game. This takes a few seconds.</p>
+  $("roomBox").innerHTML=""; $("crowd").hidden=true;
+  $("setupCards").innerHTML=`<div class="pcard"><h2>Joining room ${esc(code)}…</h2>
+    <p class="lvl-note">Connecting. This takes a few seconds.</p>
     <div class="row"><button class="ghost" id="cancelJoin">Back to menu</button></div></div>`;
   $("startRow").innerHTML="";
   $("cancelJoin").onclick=renderHome;
+}
+
+/* ---- Live games list on the home screen ---- */
+let scanPeer=null, scanTimer=null;
+async function scanLive(){
+  const box=$("liveList"); if(!box) return;
+  box.innerHTML=`<p class="lvl-note">Looking for live games…</p>`;
+  if(!(await peerReady())){ box.innerHTML=`<p class="lvl-note">Live games couldn't load. Check your internet connection.</p>`; return; }
+  if(mode!==null) return;
+  stopScan();
+  const found={}, sp=scanPeer=new Peer({debug:0});
+  sp.on("open",()=>{
+    for(let n=1;n<=LIVE_SLOTS;n++){
+      const c=sp.connect(LIVE_PREFIX+n, {reliable:true});
+      c.on("data",m=>{ if(m && m.type==="info" && typeof m.code==="string"){ found[cleanCode(m.code)]=m; paintLive(found,false); } try{ c.close(); }catch(e){} });
+      c.on("error",()=>{});
+    }
+  });
+  sp.on("error",e=>{ if(NET_ERRORS.includes(e.type)){ const b=$("liveList"); if(b) b.innerHTML=`<p class="lvl-note">Can't reach the game server. Check your internet connection.</p>`; } });
+  scanTimer=setTimeout(()=>{ paintLive(found,true); stopScan(); }, 5000);
+}
+function stopScan(){ clearTimeout(scanTimer); try{ scanPeer && scanPeer.destroy(); }catch(e){} scanPeer=null; }
+function paintLive(found, done){
+  const box=$("liveList"); if(!box || mode!==null) return;
+  const rooms=Object.values(found);
+  if(!rooms.length){
+    box.innerHTML = done ? `<p class="lvl-note">No live games right now. Create a room and it shows up here for everyone.</p>` : `<p class="lvl-note">Looking for live games…</p>`;
+    return;
+  }
+  box.innerHTML = rooms.map(r=>{
+    const bits=[r.rank, r.status==="playing"?"Duel in progress":r.status==="over"?"Between duels":"Getting ready"];
+    if(r.watching) bits.push(`${r.watching} watching`);
+    if(r.line) bits.push(`${r.line} in line`);
+    return `<div class="liveroom"><div class="liveinfo"><b>${esc(String(r.host||"Someone").slice(0,14))}'s room</b><span class="hint">${bits.filter(Boolean).map(esc).join(" · ")}</span></div>
+      <button data-live="${esc(cleanCode(r.code))}" ${r.open && !r.line?"":'class="ghost"'}>${r.open && !r.line?"Join":"Watch"}</button></div>`;
+  }).join("") + (done?"":`<p class="lvl-note">Still looking…</p>`);
+  box.querySelectorAll("[data-live]").forEach(b=>b.onclick=()=>{ stopScan(); unlockAudio(); joinRoom(b.dataset.live); });
+}
+
+/* ---- the crowd panel: who's watching, who's next ---- */
+function renderCrowd(d){
+  const box=$("crowd");
+  if(mode!=="online" || !d){ box.hidden=true; return; }
+  box.hidden=false;
+  const people=d.people||{}, queue=d.queue||[];
+  const nameOf=u=>{ const at=seatIdx(d,u); if(at>=0) return seatName(d,at); return cleanName((people[u]||{}).name) || (u==="host"?"MC":"Guest"); };
+  const meSeated = mine(0) || mine(1);
+  const inLine = queue.includes(myId);
+  const watchers = watcherIds(d).filter(u=>!queue.includes(u));
+  const openSeat = [0,1].find(i=>seatOpen(d.seats[String(i)]));
+  const awaySeat = [0,1].find(i=>d.seats[String(i)].away);
+  const typing=document.activeElement && document.activeElement.id==="nextName" ? document.activeElement.value : null;
+
+  let mine_="";
+  if(meSeated){
+    mine_ = d.status==="playing" ? `<p class="lvl-note">You're playing. After this duel you can rematch or let the next person in.</p>`
+      : `<div class="row"><span class="lvl-note" style="flex:1 1 200px">You're in a seat.</span><button class="ghost small" id="stepOut">Step out and watch</button></div>`;
+  } else if(inLine){
+    const pos=queue.indexOf(myId)+1;
+    mine_ = `<div class="row"><span class="you" style="flex:1 1 200px">You called next! You're #${pos} in line.</span><button class="ghost small" id="unNext">Leave the line</button></div>
+      ${awaySeat!==undefined?`<div class="row"><span class="lvl-note" style="flex:1 1 200px">${esc(seatName(d,awaySeat))} lost connection.</span><button class="ghost small" id="takeOver">Take over their seat</button></div>`:""}`;
+  } else {
+    const canSit = openSeat!==undefined && (!queue.length) && d.status!=="playing";
+    const canTakeOver = awaySeat!==undefined;
+    mine_ = `<label class="lab" for="nextName">Your name
+        <div class="row"><input type="text" id="nextName" maxlength="14" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Name" value="${esc(myName())}" style="flex:1;min-width:0">
+        <button id="callNext">✋ Call next</button></div></label>
+      ${canSit?`<div class="row"><button id="sitBtn">Take the open seat</button></div>`:""}
+      ${canTakeOver?`<div class="row"><span class="lvl-note" style="flex:1 1 200px">${esc(seatName(d,awaySeat))} lost connection.</span><button class="ghost small" id="takeOver">Take over their seat</button></div>`:""}`;
+  }
+  box.innerHTML=`
+    <h3>Room ${esc(roomCode||"")}</h3>
+    <div class="crowdcols">
+      <div><span class="t">Up next</span>${queue.length?`<ol class="line">${queue.map(u=>`<li${u===myId?' class="me"':""}>${esc(nameOf(u))}${u===myId?" (you)":""}</li>`).join("")}</ol>`:`<p class="lvl-note">Nobody yet. Watchers can call next.</p>`}</div>
+      <div><span class="t">Watching</span>${watchers.length?`<p class="lvl-note">${watchers.map(u=>esc(nameOf(u))+(u===myId?" (you)":"")).join(", ")}</p>`:`<p class="lvl-note">No one else is watching.</p>`}</div>
+    </div>
+    ${mine_}`;
+  if(typing!==null){ const ni=$("nextName"); if(ni){ ni.value=typing; ni.focus(); } }
+  if($("callNext")) $("callNext").onclick=()=>{
+    const nm=cleanName($("nextName").value);
+    if(!nm){ notice("Type your name first, so everyone knows who's next."); $("nextName").focus(); return; }
+    rememberMyName(nm); notice(""); act({kind:"next", name:nm});
+  };
+  if($("nextName")) $("nextName").addEventListener("keydown",e=>{ if(e.key==="Enter") $("callNext").click(); });
+  if($("unNext")) $("unNext").onclick=()=>act({kind:"unnext"});
+  if($("stepOut")) $("stepOut").onclick=()=>act({kind:"stepout"});
+  if($("sitBtn")) $("sitBtn").onclick=()=>{ const nm=cleanName($("nextName").value); if(nm){ rememberMyName(nm); act({kind:"next", name:nm}); } act({kind:"sit"}); };
+  if($("takeOver")) $("takeOver").onclick=()=>{ const ni=$("nextName"), nm=cleanName(ni?ni.value:myName()); if(nm) rememberMyName(nm); if(!inLine) act({kind:"next", name:nm||"Guest"}); act({kind:"sit"}); };
 }
 
 async function startLocal(){
@@ -776,8 +1048,9 @@ function onDoc(d){
 }
 
 function renderHome(){
-  if(linkUp()){ try{ conn.send({type:"bye"}); }catch(e){} }
-  $("homeConfirm").hidden=true;
+  if(isHost) broadcast({type:"bye"});
+  else if(linkUp()){ try{ conn.send({type:"bye"}); }catch(e){} }
+  $("homeConfirm").hidden=true; $("crowd").hidden=true;
   closePeer();
   if(unsub){ unsub(); unsub=null; }
   mode=null; latest=null; roomCode=null; isHost=false;
@@ -787,8 +1060,10 @@ function renderHome(){
   $("roomBox").innerHTML="";
   const saved=loadHost();
   $("setupCards").innerHTML=`
-    <div class="pcard"><h2>Play online</h2>
-      <p class="lvl-note">Make a game room, then share it with a QR code, the share button or the room name. Your opponent joins with no account and no phone number.</p>
+    <div class="pcard livecard"><div class="row" style="justify-content:space-between"><h2>Live games</h2><button class="ghost small" id="refreshLive">↻ Refresh</button></div>
+      <div id="liveList"><p class="lvl-note">Looking for live games…</p></div></div>
+    <div class="pcard"><h2>Host a game</h2>
+      <p class="lvl-note">Make a room. It shows up in Live games so anyone with this game can join or watch. You can also share a QR code or the room name.</p>
       <label class="lab" for="roomName">Room name (optional)
         <input type="text" id="roomName" maxlength="12" autocapitalize="characters" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="e.g. MCDOJO" class="codein" value="${esc(savedRoomName())}"></label>
       <p class="lvl-note">Pick a name and your room link never changes, so you can post it once anywhere. Leave it blank for a new random code each time.</p>
@@ -814,6 +1089,8 @@ function renderHome(){
   $("joinBtn").onclick=()=>{ const c=cleanCode($("joinCode").value); if(c.length<4){ notice("Type the room code from the text you got."); return; } unlockAudio(); joinRoom(c); };
   $("joinCode").addEventListener("keydown",e=>{ if(e.key==="Enter") $("joinBtn").click(); });
   $("localBtn").onclick=()=>{ unlockAudio(); startLocal(); };
+  $("refreshLive").onclick=scanLive;
+  scanLive();
 }
 
 function boot(){
@@ -932,6 +1209,7 @@ function render(){
   if(d.status==="lobby") renderLobby(d);
   else if(d.status==="playing") renderGame(d);
   else renderWin(d);
+  renderCrowd(d);
 }
 
 /* ---------- lobby ---------- */
@@ -946,37 +1224,41 @@ function renderLobby(d){
       <div class="qr" id="qr" aria-label="QR code to join this room"></div>
       <div class="roominfo">
         <div class="roomcode"><span class="t">Room</span><b>${esc(roomCode)}</b></div>
-        <p class="lvl-note">Scan the code with a phone camera to join. Or open <span class="linktext">${esc(baseLink().replace(/^https?:\/\//,""))}</span>, tap Join, and type the room name.</p>
+        <p class="lvl-note">Scan the code with a phone camera to join. Or open <span class="linktext">${esc(baseLink().replace(/^https?:\/\//,""))}</span> and find your room under Live games.</p>
         <div class="row"><button id="sendLink">📲 Share link</button><button class="ghost small" id="copyRoom">Copy link</button></div>
-        <p class="lvl-note" id="linkLine"><span class="linktext">${esc(roomLink(roomCode))}</span></p>
+        <label class="check"><input type="checkbox" id="publicBox" ${isPublicPref()?"checked":""}> Show my room in Live games so anyone can join</label>
       </div>
     </div>` : "";
   if($("sendLink")) $("sendLink").onclick=()=>shareLink(roomLink(roomCode), "Let's duel! Join my Spell Jutsu Duel:");
   if($("copyRoom")) $("copyRoom").onclick=()=>{ const u=roomLink(roomCode);
-    try{ navigator.clipboard.writeText(u).then(()=>notice("Link copied. Paste it anywhere: a group chat, an email, a post."),()=>notice("Copy the link shown under the buttons.")); }catch(e){ notice("Copy the link shown under the buttons."); } };
+    try{ navigator.clipboard.writeText(u).then(()=>notice("Link copied. Paste it anywhere: a group chat, an email, a post."),()=>notice("Copy this link: "+u)); }catch(e){ notice("Copy this link: "+u); } };
+  if($("publicBox")) $("publicBox").onchange=e=>setPublic(e.target.checked);
   drawQR(roomLink(roomCode));
 
   $("setupCards").innerHTML=[0,1].map(i=>{
     const s=d.seats[i], me = online ? mine(i) : true, ready=!!s.ready;
+    if(online && !s.uid) return `<div class="pcard opencard">
+      <h2>Open seat</h2>
+      <p class="lvl-note">${(d.queue||[]).length ? "Filling from the line…" : "The next person to join or call next plays here."}</p>
+    </div>`;
     const canChange = me && !ready;
-    const present = !online || me || (i===1 ? linkUp() : true);
+    const present = !online || (s.uid && !s.away);
     let status;
-    if(!present) status=`<span class="taken">Waiting to join…</span>`;
+    if(!present) status=`<span class="taken">Lost connection…</span>`;
     else if(ready) status=`<span class="you">✓ Ready</span>`;
     else status=`<span class="taken">${online && !me ? "Choosing…" : "Not ready yet"}</span>`;
     if(online && me) status=`<span class="you">This is you</span> · ${status}`;
-    const fallback = i===0 ? "MC" : LEVEL_NAMES[s.lvl];
+    const fallback = seatFallback(d,i);
     return `<div class="pcard${ready?" is-ready":""}">
       <h2 style="color:${s.color}">${esc(seatName(d,i))}</h2>
       <div class="seatline">${status}</div>
       <label class="lab" for="nameIn${i}">Name
         <input type="text" id="nameIn${i}" maxlength="14" autocomplete="off" autocorrect="off" spellcheck="false"
           placeholder="${esc(fallback)}" value="${esc(cleanName(s.name))}" ${canChange?"":"disabled"}></label>
-      <p class="lvl-note">${i===0 ? "Leave it blank to be MC." : "Leave it blank to use the rank name: Ant for Academy and Genin, Drew for Chunin, Ri for Jonin and Kage."}</p>
       <div class="lab">Headband color<div class="chips" data-k="color" data-i="${i}">
         ${BAND_COLORS.map(c=>`<button class="swatch" style="--c:${c}" data-v="${c}" aria-label="Color ${c}" aria-pressed="${s.color===c}" ${canChange?"":"disabled"}></button>`).join("")}
       </div></div>
-      <div class="lab">Level<div class="chips" data-k="lvl" data-i="${i}">
+      <div class="lab">Rank<div class="chips" data-k="lvl" data-i="${i}">
         ${Object.entries(LEVELS).map(([k,l])=>`<button class="chip" data-v="${k}" aria-pressed="${s.lvl===k}" ${canChange?"":"disabled"}>${l.label}</button>`).join("")}
       </div><p class="lvl-note">${LEVELS[s.lvl].note}</p></div>
       ${me ? `<button class="readybtn${ready?" ghost":""}" data-ready="${i}">${ready ? "Not ready, change my ninja" : "I'm ready"}</button>` : ""}
@@ -1003,30 +1285,34 @@ function renderLobby(d){
   });
 
   const r0=d.seats["0"].ready, r1=d.seats["1"].ready;
+  const seated = mine(0) || mine(1);
   let msg;
-  if(online && isHost && !linkUp()) msg="Text the link to your opponent. When they tap it, they'll show up here.";
-  else if(online && !isHost && !linkUp()) msg="Reconnecting to the game…";
+  if(online && !isHost && !linkUp()) msg="Reconnecting to the room…";
+  else if(online && (!d.seats["0"].uid || !d.seats["1"].uid)) msg = isHost ? "Waiting for someone to join. Share your room, or keep it in Live games." : "Waiting for a second player.";
   else if(r0 && r1) msg="Both ninjas are ready. Starting…";
-  else if(!online) msg="Each player picks a name, color and level, then taps I'm ready. The duel starts when both are ready.";
+  else if(!online) msg="Each player picks a name, color and rank, then taps I'm ready. The duel starts when both are ready.";
+  else if(!seated) msg="You're watching. Call next below to get in line.";
   else {
     const myI = mine(0)?0:1, other=1-myI;
-    msg = !d.seats[myI].ready ? "Pick your name, color and level, then tap I'm ready."
+    msg = !d.seats[myI].ready ? "Pick your name, color and rank, then tap I'm ready."
         : `Waiting for ${esc(seatName(d,other))} to be ready…`;
   }
   $("startRow").innerHTML = `
     <span class="hint">${msg}</span>
-    <button class="ghost" id="menuBtn">${online ? (isHost ? "Close room" : "Leave game") : "Back to menu"}</button>`;
-  $("menuBtn").onclick=renderHome;
+    <button class="ghost" id="menuBtn">${online ? (isHost ? "Close room" : "Leave room") : "Back to menu"}</button>`;
+  $("menuBtn").onclick=()=>$("homeBtn").click();
 }
 
 /* The host (or the single device) starts the duel once both players are ready. */
 let starting=false;
 function maybeStart(d){
-  if(starting || d.status!=="lobby" || !d.seats["0"].ready || !d.seats["1"].ready) return;
-  if(!(mode==="local" || (isHost && linkUp()))) return;
+  const s0=d.seats["0"], s1=d.seats["1"];
+  if(starting || d.status!=="lobby" || !s0.ready || !s1.ready) return;
+  if(mode==="online" && (!isHost || !s0.uid || !s1.uid || s0.away || s1.away)) return;
+  if(mode!=="local" && mode!=="online") return;
   starting=true;
   setTimeout(()=>{
-    write({...freshMatch(), seats:{"0":{ready:false},"1":{ready:false}}}).finally(()=>{ starting=false; });
+    write({...freshMatch(), seats:{"0":{ready:false, again:null},"1":{ready:false, again:null}}}).finally(()=>{ starting=false; });
   }, 700);
 }
 
@@ -1129,7 +1415,7 @@ function renderGame(d){
       panel.innerHTML = `
         <p class="jutsu">${LEVELS[p.lvl].label}${items.length>1?" · double jutsu":""} · watching live</p>
         <p class="who">${name} is charging a jutsu…</p>
-        ${sh?`<p class="sentence">Your <span style="color:${ELEMENTS[sh].c};text-shadow:0 1px 0 #2b2216">${ELEMENTS[sh].label}</span> shield is up.
+        ${sh?`<p class="sentence">${mine(1-d.turn)?"Your":esc(seatName(d,1-d.turn))+"'s"} <span style="color:${ELEMENTS[sh].c};text-shadow:0 1px 0 #2b2216">${ELEMENTS[sh].label}</span> shield is up.
           <span id="watchEl">${name} hasn't picked an element yet.</span></p>`:""}
         ${items.map((it,k)=>`<div class="wordbox">
           ${items.length>1?`<p class="jutsu">Word ${k+1} of ${items.length}</p>`:""}
@@ -1310,8 +1596,25 @@ function animate(L,done){
 function renderWin(d){
   panelKey="";
   const w=d.winner, v=$("winView");
-  const canAct = !readOnly && (mode==="local" || mine(0) || mine(1));
-  const L=d.last;
+  const L=d.last, online=mode==="online";
+  const myAt = online ? (mine(0)?0:mine(1)?1:-1) : -1;
+  const queue=d.queue||[];
+  const nextName = queue.length ? (cleanName(((d.people||{})[queue[0]]||{}).name) || "Guest") : "";
+  let actions;
+  if(!online){
+    actions = `<button id="rematch">Rematch</button><button class="ghost" id="changeSetup">Change ninjas</button>`;
+  } else if(myAt>=0){
+    const me=d.seats[String(myAt)], other=d.seats[String(1-myAt)], otherName=esc(seatName(d,1-myAt));
+    const otherSays = other.again===true ? `${otherName} wants a rematch!` : `Waiting for ${otherName} to choose…`;
+    actions = me.again===true
+      ? `<span class="you">You picked Rematch.</span><span class="hint">${otherSays}</span><button class="ghost small" id="doneBtn">Actually, I'm done</button>`
+      : `<button id="againBtn">⚔️ Rematch</button><button class="ghost" id="doneBtn">I'm done${nextName?`, let ${esc(nextName)} in`:""}</button>
+         <span class="hint">${other.again===true?otherSays:(nextName?`${esc(nextName)} called next.`:"")}</span>`;
+  } else {
+    const ws=[0,1].map(i=>d.seats[String(i)]);
+    const said=ws.map((s,i)=>s.again===true?`${esc(seatName(d,i))} wants a rematch.`:"").filter(Boolean).join(" ");
+    actions = `<span class="hint">Waiting to see if they rematch… ${said}</span>`;
+  }
   v.innerHTML=`
     <h2 style="color:${d.seats[w].color}">${esc(seatName(d,w))} wins the duel!</h2>
     ${L?`<p class="tag">Final move: ${esc(seatName(d,L.by))}'s ${esc(L.move)}${L.outcome==="backfire"?" backfired":L.outcome==="hit"?` for ${L.dmg} damage`:" fizzled"}.</p>`:""}
@@ -1322,25 +1625,25 @@ function renderWin(d){
         ${s.missed.length?`<div class="hint" style="margin-top:6px">Words to practice:</div><ul class="missed">${s.missed.map(m=>`<li>${esc(m)}</li>`).join("")}</ul>`:`<div class="hint" style="margin-top:6px">No misspellings. Perfect!</div>`}
       </div>`}).join("")}
     </div>
-    <div class="start-row" style="margin-top:16px">
-      ${canAct?`<button id="rematch">Rematch</button><button class="ghost" id="changeSetup">Change ninjas</button>`:`<span class="hint">Waiting for a rematch…</span>`}
-    </div>`;
-  if(canAct){
-    $("rematch").onclick=()=>write(freshMatch());
-    $("changeSetup").onclick=()=>write({status:"lobby", seats:{"0":{ready:false},"1":{ready:false}}});
-  }
+    <div class="start-row" style="margin-top:16px">${actions}</div>`;
+  if($("rematch")) $("rematch").onclick=()=>write(freshMatch());
+  if($("changeSetup")) $("changeSetup").onclick=()=>write({status:"lobby", seats:{"0":{ready:false},"1":{ready:false}}});
+  if($("againBtn")) $("againBtn").onclick=()=>{ unlockAudio(); act({kind:"again", v:true}); };
+  if($("doneBtn")) $("doneBtn").onclick=()=>act({kind:"again", v:false});
 }
 
 /* ---------- live view of the other player's spelling ---------- */
 let lastTyping=null, typingTimer=null;
 function sendTyping(){
-  if(mode!=="online" || !spell || !linkUp()) return;
+  if(mode!=="online" || !spell) return;
   clearTimeout(typingTimer);
   typingTimer=setTimeout(()=>{
-    if(!spell || !linkUp()) return;
-    try{ conn.send({type:"typing", id:spell.id,
+    if(!spell) return;
+    const msg={type:"typing", id:spell.id,
       answers:spell.items.map((_,k)=>{ const el=$("answer"+k); return el ? el.value.slice(0,24) : ""; }),
-      picked:spell.picked||null, peeked:!!spell.peeked}); }catch(e){}
+      picked:spell.picked||null, peeked:!!spell.peeked};
+    if(isHost) broadcast(msg);
+    else if(linkUp()){ try{ conn.send(msg); }catch(e){} }
   }, 40);
 }
 function onTyping(m){
