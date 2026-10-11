@@ -90,6 +90,9 @@ input[type=text]{font-family:var(--body);font-size:18px;font-weight:700;padding:
 .picktitle{font-weight:900;margin:0;font-size:16px}
 .needs{font-size:14px;margin:0;color:#6b5a3e;font-weight:700}
 .seals{display:flex;flex-wrap:wrap;gap:6px;min-height:30px}
+.meaning{margin:0;font-weight:700;color:#6b5a3e}
+.meaning b{color:var(--paper-ink)}
+.accents button{min-width:40px;padding:6px 10px;font-size:18px;text-transform:none}
 .answer{margin:0;font-weight:700;color:#6b5a3e}
 .answer b{font-family:var(--display);font-weight:400;font-size:24px;letter-spacing:.08em;color:var(--paper-ink)}
 .seals.watch{min-height:36px}
@@ -117,6 +120,7 @@ button{touch-action:manipulation}
 .scroll input.active{box-shadow:0 0 0 3px var(--persimmon)}
 .scroll input[readonly]{caret-color:transparent;cursor:pointer}
 .kb{background:var(--ink);border-radius:12px;padding:8px 4px;display:flex;flex-direction:column;gap:6px;user-select:none;-webkit-user-select:none}
+.kb .r[hidden]{display:none}
 .kb .r{display:flex;gap:5px;justify-content:center}
 .kb button{flex:1;max-width:46px;min-width:0;height:48px;padding:0;border-radius:7px;font-size:19px;background:var(--night-2);color:var(--moon);text-transform:uppercase}
 .kb button:active{background:var(--persimmon);color:var(--ink)}
@@ -1248,8 +1252,247 @@ vindicate|The test results helped vindicate the scientist's bold theory.
 vivacious|The vivacious girl lit up the room with her lively laughter.
 zephyr|A gentle zephyr rustled the leaves on a warm spring evening.`
 };
-const parsed = {};
+/* Spanish words: word|Spanish sentence|English meaning */
+const WORDS_ES = {
+  academy:`gato|El gato toma leche.|cat
+perro|Mi perro corre mucho.|dog
+pato|El pato nada en el lago.|duck
+vaca|La vaca da leche.|cow
+oso|El oso come miel.|bear
+mono|El mono sube al árbol.|monkey
+sapo|El sapo salta alto.|toad
+rana|La rana es verde.|frog
+pez|El pez nada rápido.|fish
+pollo|El pollo come maíz.|chicken
+gallina|La gallina pone huevos.|hen
+burro|El burro es lento.|donkey
+cerdo|El cerdo come mucho.|pig
+oveja|La oveja es blanca.|sheep
+loro|El loro habla mucho.|parrot
+león|El león ruge fuerte.|lion
+tigre|El tigre tiene rayas.|tiger
+conejo|El conejo salta feliz.|rabbit
+foca|La foca juega en el agua.|seal
+mamá|Mi mamá me abraza.|mom
+papá|Mi papá cocina rico.|dad
+bebé|El bebé duerme.|baby
+tío|Mi tío es alto.|uncle
+tía|Mi tía canta bonito.|aunt
+abuelo|Mi abuelo lee un libro.|grandfather
+hermana|Mi hermana es ninja.|sister
+niño|El niño come pan.|boy
+niña|La niña salta la cuerda.|girl
+amigo|Mi amigo es un ninja.|friend
+rojo|El tomate es rojo.|red
+azul|El cielo es azul.|blue
+verde|La hoja es verde.|green
+blanco|Mi conejo es blanco.|white
+negro|Mi gato es negro.|black
+rosa|Mi vestido es rosa.|pink
+gris|El ratón es gris.|gray
+café|El oso es café.|brown
+morado|La uva es de color morado.|purple
+leche|Me gusta la leche.|milk
+pan|Como pan con queso.|bread
+queso|El queso es rico.|cheese
+sopa|La sopa está caliente.|soup
+uva|La uva es dulce.|grape
+pera|La pera es verde.|pear
+mango|El mango es amarillo.|mango
+piña|La piña es dulce.|pineapple
+limón|El limón es ácido.|lemon
+papa|Me gusta la papa.|potato
+arroz|Como arroz con pollo.|rice
+huevo|El huevo es blanco.|egg
+miel|La miel es dulce.|honey
+jugo|Tomo jugo de naranja.|juice
+agua|Bebo agua fría.|water
+sal|La sopa tiene sal.|salt
+torta|La torta es de chocolate.|cake
+mano|Mi mano es pequeña.|hand
+pie|Me duele el pie.|foot
+dedo|Tengo un dedo sucio.|finger
+boca|Abro la boca.|mouth
+nariz|Mi nariz es pequeña.|nose
+ojo|Cierro un ojo.|eye
+pelo|Mi pelo es largo.|hair
+cara|Lavo mi cara.|face
+diente|Se me cayó un diente.|tooth
+oreja|El conejo mueve la oreja.|ear
+brazo|Levanto el brazo.|arm
+pierna|El ninja mueve la pierna.|leg
+casa|Mi casa es grande.|house
+mesa|La mesa es de madera.|table
+silla|Me siento en la silla.|chair
+cama|Mi cama es suave.|bed
+puerta|Abro la puerta.|door
+sofá|El gato duerme en el sofá.|sofa
+taza|La taza tiene leche.|cup
+vaso|El vaso tiene agua.|glass
+plato|El plato está limpio.|plate
+libro|Leo un libro bonito.|book
+papel|Dibujo en el papel.|paper
+goma|Borro con la goma.|eraser
+color|Pinto con un color rojo.|color
+dibujo|Mi dibujo es un ninja.|drawing
+cuento|Me gusta este cuento.|story
+sol|El sol brilla mucho.|sun
+luna|La luna sale de noche.|moon
+flor|La flor es roja.|flower
+árbol|El árbol es alto.|tree
+nube|La nube es blanca.|cloud
+mar|El mar es azul.|sea
+río|El río tiene peces.|river
+hoja|La hoja cae del árbol.|leaf
+piedra|La piedra es dura.|stone
+cielo|El cielo está claro.|sky
+playa|Jugamos en la playa.|beach
+uno|Tengo uno.|one
+dos|Tengo dos gatos.|two
+tres|Veo tres patos.|three
+cuatro|Tengo cuatro años.|four
+cinco|Tengo cinco dedos.|five
+seis|Hay seis sillas.|six
+siete|Veo siete estrellas.|seven
+ocho|El pulpo tiene ocho brazos.|eight
+nueve|Hay nueve libros.|nine
+diez|Cuento hasta diez.|ten
+pelota|La pelota es roja.|ball
+globo|Mi globo es azul.|balloon
+muñeca|La muñeca es bonita.|doll
+tren|El tren va rápido.|train
+auto|El auto es nuevo.|car
+barco|El barco está en el mar.|boat
+ninja|El ninja salta alto.|ninja
+espada|El ninja tiene una espada.|sword
+salto|El ninja da un salto.|jump
+feliz|Estoy muy feliz.|happy
+grande|El elefante es grande.|big
+chico|El ratón es chico.|small
+día|Hoy es un buen día.|day
+noche|De noche veo la luna.|night`,
+  genin:`escuela|Voy a la escuela todos los días.|school
+ventana|El ninja salta por la ventana abierta.|window
+mariposa|La mariposa vuela entre las flores.|butterfly
+abuela|Mi abuela cocina sopa muy rica.|grandmother
+jirafa|La jirafa tiene el cuello muy largo.|giraffe
+zapato|Perdí un zapato en el parque.|shoe
+guitarra|Mi tío toca la guitarra en las fiestas.|guitar
+lápiz|Escribo mi nombre con un lápiz.|pencil
+corazón|Dibujé un corazón rojo para mi mamá.|heart
+murciélago|El murciélago duerme de cabeza durante el día.|bat
+hermano|Mi hermano juega conmigo en el jardín.|brother
+llave|Abro la puerta con una llave.|key
+invierno|En invierno hace mucho frío.|winter
+verano|En verano vamos a la playa.|summer
+bicicleta|Monto mi bicicleta los sábados.|bicycle
+caballo|El caballo corre por el campo.|horse
+ballena|La ballena nada en el océano.|whale
+lluvia|La lluvia moja las calles.|rain
+cebolla|La cebolla me hace llorar.|onion
+zanahoria|El conejo come una zanahoria.|carrot
+calabaza|Hicimos sopa de calabaza.|pumpkin
+cereza|Puse una cereza sobre el pastel.|cherry
+manzana|Como una manzana en el recreo.|apple
+naranja|Exprimo una naranja para hacer jugo.|orange
+fresa|La fresa es roja y dulce.|strawberry
+helado|Quiero un helado de chocolate.|ice cream
+hielo|Pongo hielo en mi limonada.|ice
+hormiga|La hormiga lleva una miga de pan.|ant
+hospital|La doctora trabaja en el hospital.|hospital
+historia|La maestra nos leyó una historia divertida.|story
+gigante|El ninja vio un muñeco de nieve gigante.|giant
+girasol|El girasol mira hacia el sol.|sunflower
+gente|Mucha gente vino a la fiesta.|people
+jardín|Plantamos tomates en el jardín.|garden
+juguete|Mi juguete favorito es un robot.|toy
+guisante|El guisante es pequeño y verde.|pea
+águila|El águila vuela muy alto.|eagle
+pingüino|El pingüino camina sobre el hielo.|penguin
+cigüeña|La cigüeña construyó su nido en la torre.|stork
+vergüenza|Sentí vergüenza al olvidar mi línea.|embarrassment
+paraguas|Llevo un paraguas cuando llueve.|umbrella
+quince|Mi prima cumple quince años.|fifteen
+mosquito|Un mosquito zumba cerca de mi oreja.|mosquito
+máquina|La máquina hace galletas muy rápido.|machine
+pequeño|El ratón es pequeño y rápido.|small
+tranquilo|El ninja respira tranquilo antes de saltar.|calm
+orquesta|La orquesta toca música en el teatro.|orchestra
+parque|Jugamos a la pelota en el parque.|park
+bosque|El ninja corre en silencio por el bosque.|forest
+payaso|El payaso nos hizo reír mucho.|clown
+estrella|Veo una estrella brillar en la noche.|star
+castillo|El rey vive en un castillo enorme.|castle
+amarillo|El plátano es de color amarillo.|yellow
+tortuga|La tortuga camina muy despacio.|turtle
+ratón|El ratón come un pedazo de queso.|mouse
+camión|El camión lleva frutas al mercado.|truck
+avión|El avión vuela sobre las nubes.|airplane
+canción|Cantamos una canción en clase.|song
+lección|Hoy aprendimos una lección de ciencias.|lesson
+música|Me gusta escuchar música alegre.|music
+número|El siete es mi número favorito.|number
+sábado|El sábado no hay clases.|saturday
+miércoles|El miércoles tengo clase de arte.|wednesday
+teléfono|Mi papá habla por teléfono.|telephone
+película|Vimos una película de ninjas.|movie
+pájaro|El pájaro canta en la rama.|bird
+brújula|El ninja usa una brújula para no perderse.|compass
+fútbol|Juego fútbol con mis amigos.|soccer
+azúcar|La limonada lleva un poco de azúcar.|sugar
+difícil|El examen de hoy fue difícil.|difficult
+fácil|Esta tarea es muy fácil.|easy
+césped|El perro corre sobre el césped verde.|grass
+dulce|La miel es muy dulce.|sweet
+cocina|Mi abuelo prepara la cena en la cocina.|kitchen
+cuchara|Como la sopa con una cuchara.|spoon
+tenedor|Uso el tenedor para comer la ensalada.|fork
+servilleta|Me limpio la boca con una servilleta.|napkin
+botella|La botella de agua está vacía.|bottle
+bandera|La bandera ondea en la escuela.|flag
+volcán|El volcán está dormido hace años.|volcano
+viento|El viento mueve las hojas.|wind
+nieve|Hicimos un muñeco de nieve.|snow
+selva|El mono vive en la selva.|jungle
+serpiente|La serpiente se esconde bajo una roca.|snake
+zorro|El zorro tiene la cola larga.|fox
+cabeza|Me pongo el sombrero en la cabeza.|head
+rodilla|Me raspé la rodilla jugando.|knee
+espalda|Llevo la mochila en la espalda.|back
+cepillo|Me lavo los dientes con el cepillo.|brush
+jabón|Me lavo las manos con jabón.|soap
+baño|Me cepillo los dientes en el baño.|bathroom
+compañero|Mi compañero me prestó su borrador.|classmate
+maestra|La maestra explica la lección.|teacher
+cuaderno|Escribo la tarea en mi cuaderno.|notebook
+mochila|Guardo mis libros en la mochila.|backpack
+tijeras|Corto el papel con las tijeras.|scissors
+regla|Mido la línea con una regla.|ruler
+borrador|Uso el borrador para corregir errores.|eraser
+examen|Estudié mucho para el examen.|test
+biblioteca|Leo cuentos en la biblioteca.|library
+vecino|Mi vecino tiene un perro simpático.|neighbor
+domingo|El domingo visitamos a los abuelos.|sunday
+noviembre|Mi cumpleaños es en noviembre.|november
+calcetín|Encontré un calcetín debajo de la cama.|sock
+bufanda|Uso una bufanda cuando hace frío.|scarf
+abrigo|Me pongo el abrigo para salir.|coat
+chaqueta|El ninja guardó su chaqueta negra.|jacket
+almohada|Mi almohada es suave y blanda.|pillow
+zapatilla|Me até la zapatilla para correr.|sneaker
+sandía|La sandía es roja por dentro.|watermelon
+ciudad|Vivo en una ciudad grande.|city
+océano|El océano es enorme y profundo.|ocean`
+};
+const parsed = {}, parsedEs = {};
 for (const k in WORDS) parsed[k] = WORDS[k].trim().split("\n").map(l=>{const [w,s]=l.split("|");return {w:w.trim(),s:s.trim()}});
+for (const k in WORDS_ES) parsedEs[k] = WORDS_ES[k].trim().split("\n").map(l=>{const [w,s,en]=l.split("|");return {w:w.trim(),s:s.trim(),en:(en||"").trim(),lang:"es"}});
+const ES_RANKS = Object.keys(WORDS_ES);
+const seatLang = s => (s && s.lang==="es" && ES_RANKS.includes(s.lvl)) ? "es" : "en";
+const rankLabel = s => LEVELS[s.lvl].label + (seatLang(s)==="es" ? " · Español" : "");
+/* accent marks are optional (café = cafe), but ñ counts as its own letter */
+const plain = t => String(t||"").toLowerCase().replace(/ñ/g,"\u0001").normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/\u0001/g,"ñ");
+const wordRe = w => new RegExp("(?<![\\p{L}])"+w.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"(?![\\p{L}])","iu");
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -1258,8 +1501,8 @@ const rid = () => Math.random().toString(36).slice(2,10);
 const freshStats = () => ({hits:0,fizzles:0,bonus:0,backfires:0,missed:[]});
 function freshMatch(){ return {status:"playing", hp:{"0":MAX_HP,"1":MAX_HP}, turn:0, phase:"ready", cur:null, last:null, winner:null, stats:{"0":freshStats(),"1":freshStats()}}; }
 function freshDoc(uid){ return {...freshMatch(), status:"lobby", seats:{
-  "0":{uid:uid||null, color:BAND_COLORS[0], lvl:"jonin", name:"", ready:false, again:null, away:false},
-  "1":{uid:uid||null, color:BAND_COLORS[1], lvl:"academy", name:"", ready:false, again:null, away:false}},
+  "0":{uid:uid||null, color:BAND_COLORS[0], lvl:"jonin", lang:"en", name:"", ready:false, again:null, away:false},
+  "1":{uid:uid||null, color:BAND_COLORS[1], lvl:"academy", lang:"en", name:"", ready:false, again:null, away:false}},
   queue:[], people:{}}; }
 /* Ninja 2 can type a name; blank means the level name (Ant, Drew or Ri). */
 const cleanName = n => String(n||"").replace(/\s+/g," ").trim().slice(0,14);
@@ -1366,7 +1609,7 @@ function makeGuestStore(){
 }
 
 /* ---- room rules, run on the host ---- */
-function blankSeat(color, lvl){ return {uid:null, name:"", color, lvl, ready:false, again:null, away:false}; }
+function blankSeat(color, lvl){ return {uid:null, name:"", color, lvl, lang:"en", ready:false, again:null, away:false}; }
 function freeColor(d, i){ const other=d.seats[String(1-i)].color; return BAND_COLORS.find(c=>c!==other) || BAND_COLORS[0]; }
 function fillSeat(d, i){
   const k=String(i), old=d.seats[k];
@@ -1790,10 +2033,18 @@ const sfx = {
   fizzle(){tone(400,.5,"sawtooth",-330,.1)}
 };
 const canSpeak = "speechSynthesis" in window;
-function speak(text,rate=.8){
+function speak(text,rate=.8,lang="en"){
   if(!canSpeak) return;
-  try{ speechSynthesis.cancel(); const u=new SpeechSynthesisUtterance(text); u.rate=rate; u.lang="en-US"; speechSynthesis.speak(u);}catch(e){}
+  try{
+    speechSynthesis.cancel();
+    const u=new SpeechSynthesisUtterance(text); u.rate=rate;
+    u.lang = lang==="es" ? "es-MX" : "en-US";
+    const v=speechSynthesis.getVoices().find(x=>x.lang && x.lang.toLowerCase().startsWith(lang==="es"?"es":"en"));
+    if(v) u.voice=v;
+    speechSynthesis.speak(u);
+  }catch(e){}
 }
+try{ speechSynthesis.getVoices(); }catch(e){}
 
 /* ---------- on-screen keyboard for phones (no swipe typing or autocorrect) ---------- */
 const TOUCH = matchMedia("(pointer: coarse)").matches || "ontouchstart" in window;
@@ -1804,7 +2055,8 @@ function buildKb(){
   kb.innerHTML=rows.map(r=>`<div class="r">${[...r].map(ch=>
     ch==="⌫"?`<button class="wide" data-k="back" aria-label="Delete">⌫</button>`:
     ch==="↵"?`<button class="wide go" data-k="enter" id="kbEnter">Cast</button>`:
-    `<button data-k="${ch}">${ch}</button>`).join("")}</div>`).join("");
+    `<button data-k="${ch}">${ch}</button>`).join("")}</div>`).join("")
+    + `<div class="r" id="kbEs" hidden>${[..."áéíóúñü"].map(ch=>`<button data-k="${ch}">${ch}</button>`).join("")}</div>`;
   kb.addEventListener("pointerdown",e=>{
     const b=e.target.closest("button"); if(!b) return;
     e.preventDefault();
@@ -1825,6 +2077,7 @@ function showKb(on){
   if(on){
     const castRow=$("castBtn") && $("castBtn").closest(".row");
     if(castRow) castRow.parentNode.insertBefore(kb, castRow);
+    const es=$("kbEs"); if(es) es.hidden = !(spell && spell.items.some(x=>x.lang==="es"));
     kb.hidden=false;
   } else {
     kb.hidden=true;
@@ -1839,7 +2092,7 @@ function setActive(k){
 }
 function submitField(k){
   const nxt=$("answer"+(k+1));
-  if(nxt){ setActive(k+1); if(!TOUCH) nxt.focus(); speak(spell.items[k+1].w); }
+  if(nxt){ setActive(k+1); if(!TOUCH) nxt.focus(); speak(spell.items[k+1].w,.8,spell.items[k+1].lang); }
   else cast();
 }
 
@@ -1927,16 +2180,23 @@ function renderLobby(d){
       <div class="lab">Headband color<div class="chips" data-k="color" data-i="${i}">
         ${BAND_COLORS.map(c=>`<button class="swatch" style="--c:${c}" data-v="${c}" aria-label="Color ${c}" aria-pressed="${s.color===c}" ${canChange?"":"disabled"}></button>`).join("")}
       </div></div>
+      <div class="lab">Language<div class="chips" data-k="lang" data-i="${i}">
+        <button class="chip" data-v="en" aria-pressed="${seatLang(s)!=="es"}" ${canChange?"":"disabled"}>English</button>
+        <button class="chip" data-v="es" aria-pressed="${seatLang(s)==="es"}" ${canChange?"":"disabled"}>Español</button>
+      </div></div>
       <div class="lab">Rank<div class="chips" data-k="lvl" data-i="${i}">
-        ${Object.entries(LEVELS).map(([k,l])=>`<button class="chip" data-v="${k}" aria-pressed="${s.lvl===k}" ${canChange?"":"disabled"}>${l.label}</button>`).join("")}
-      </div><p class="lvl-note">${LEVELS[s.lvl].note}</p></div>
+        ${Object.entries(LEVELS).map(([k,l])=>{ const esOff = seatLang(s)==="es" && !ES_RANKS.includes(k);
+          return `<button class="chip" data-v="${k}" aria-pressed="${s.lvl===k}" ${canChange && !esOff?"":"disabled"} ${esOff?'title="English only"':""}>${l.label}</button>`; }).join("")}
+      </div><p class="lvl-note">${seatLang(s)==="es" ? "Spanish words, read aloud in Spanish, with the English meaning shown. Accent marks are optional, but ñ counts. Español has Academy Student and Genin only." : LEVELS[s.lvl].note}</p></div>
       ${me ? `<button class="readybtn${ready?" ghost":""}" data-ready="${i}">${ready ? "Not ready, change my ninja" : "I'm ready"}</button>` : ""}
     </div>`;
   }).join("");
 
   $("setupCards").querySelectorAll(".chips").forEach(g=>g.addEventListener("click",e=>{
     const b=e.target.closest("button"); if(!b || b.disabled) return;
-    write({seats:{[g.dataset.i]:{[g.dataset.k]:b.dataset.v}}});
+    const patch={[g.dataset.k]:b.dataset.v};
+    if(g.dataset.k==="lang" && b.dataset.v==="es" && !ES_RANKS.includes(latest.seats[g.dataset.i].lvl)) patch.lvl="academy";
+    write({seats:{[g.dataset.i]:patch}});
   }));
   [0,1].forEach(i=>{
     const ni=$("nameIn"+i); if(!ni || ni.disabled) return;
@@ -2019,12 +2279,13 @@ function resultHTML(L,d){
       ? ` ${ELEMENTS[picked].label} beats ${ELEMENTS[shield].label}, so it was super effective!`
       : ` ${ELEMENTS[picked].label} doesn't beat ${ELEMENTS[shield].label}. ${ELEMENTS[counterOf(shield)].label} would have.`) : "";
   let msg;
-  if(L.outcome==="hit") msg=`<span class="ok">Direct hit!</span> ${nm} did ${L.dmg} damage.${elNote}${L.peeked?" (Half power after peeking.)":""}`;
+  const accNote = (L.accentFix||[]).length && L.outcome!=="fizzle" ? ` Remember the accent${L.accentFix.length>1?"s":""}: <b>${L.accentFix.map(esc).join(", ")}</b>.` : "";
+  if(L.outcome==="hit") msg=`<span class="ok">Direct hit!</span> ${nm} did ${L.dmg} damage.${elNote}${L.peeked?" (Half power after peeking.)":""}${accNote}`;
   else if(L.outcome==="backfire") msg=`<span class="no">Backfire!</span> ${nm} spelled it perfectly, but ${ELEMENTS[picked].label} can't break a ${ELEMENTS[shield].label} shield. ${nm} lost ${L.self} chakra. ${ELEMENTS[counterOf(shield)].label} was the right pick.`;
   else msg=`<span class="no">The jutsu fizzled.</span> ${nm} wrote ${L.guesses.map(g=>"“"+esc(g)+"”").join(" and ")}. ${L.wrong.length>1?"The right spellings are:":"The right spelling is:"}`;
   return `<p class="jutsu">Last turn · ${esc(L.move)}</p>
     <p class="result">${msg}</p>
-    ${L.outcome==="fizzle"?L.wrong.map(w=>`<p class="correct">${esc(w)}</p>`).join("")+`<div class="row"><button class="ghost" data-say="${esc(L.wrong.join(". "))}">🔊 Hear it</button></div>`:""}
+    ${L.outcome==="fizzle"?L.wrong.map(w=>`<p class="correct">${esc(w)}</p>`).join("")+`<div class="row"><button class="ghost" data-say="${esc(L.wrong.join(". "))}" data-lang="${L.lang==="es"?"es":"en"}">🔊 Hear it</button></div>`:""}
     <hr class="cut">`;
 }
 function logLine(d){
@@ -2066,7 +2327,7 @@ function renderGame(d){
     spell=null; showKb(false);
     if(me && !readOnly){
       panel.innerHTML = lastBlock + `
-        <p class="jutsu">${LEVELS[p.lvl].label} level</p>
+        <p class="jutsu">${rankLabel(p)}</p>
         <p class="who">${online?"Your turn, ":""}${name}${online?"":"'s turn"}</p>
         <p class="sentence">${online ? "Press Ready to hear your word." : `${foeName}, look away! ${name}, press Ready to hear your word.`}</p>
         <div class="row"><button id="readyBtn">Ready</button></div>`;
@@ -2082,13 +2343,14 @@ function renderGame(d){
       spell=null; showKb(false);
       const sh=d.cur.shield, items=d.cur.items;
       panel.innerHTML = `
-        <p class="jutsu">${LEVELS[p.lvl].label}${items.length>1?" · double jutsu":""} · watching live</p>
+        <p class="jutsu">${rankLabel(p)}${items.length>1?" · double jutsu":""} · watching live</p>
         <p class="who">${name} is charging a jutsu…</p>
         ${sh?`<p class="sentence">${mine(1-d.turn)?"Your":esc(seatName(d,1-d.turn))+"'s"} <span style="color:${ELEMENTS[sh].c};text-shadow:0 1px 0 #2b2216">${ELEMENTS[sh].label}</span> shield is up.
           <span id="watchEl">${name} hasn't picked an element yet.</span></p>`:""}
         ${items.map((it,k)=>`<div class="wordbox">
           ${items.length>1?`<p class="jutsu">Word ${k+1} of ${items.length}</p>`:""}
           <p class="sentence">${esc(it.s)}</p>
+          ${it.en?`<p class="meaning">In English: <b>${esc(it.en)}</b></p>`:""}
           <p class="answer">Answer: <b>${esc(it.w)}</b></p>
           <div class="seals watch" id="watch${k}" aria-live="polite"><span class="hint">Waiting for ${name} to type…</span></div>
           <p class="watchnote" id="watchNote${k}"></p>
@@ -2097,41 +2359,45 @@ function renderGame(d){
       paintWatch();
     }
   }
-  panel.querySelectorAll("[data-say]").forEach(b=>b.onclick=()=>speak(b.dataset.say));
+  panel.querySelectorAll("[data-say]").forEach(b=>b.onclick=()=>speak(b.dataset.say,.8,b.dataset.lang||"en"));
 }
 
 /* word picking: avoid repeats on this device until the list runs out */
 /* Each device remembers which words it has used (even after a reload),
    so a word only comes back once its whole rank list has been used. */
 const USED_KEY="spelljutsu-used-words";
-const used = {}; for(const k in LEVELS) used[k]=new Set();
+const used = {}; for(const k in LEVELS) used[k]=new Set(); for(const k in WORDS_ES) used["es:"+k]=new Set();
 try{ const saved=JSON.parse(localStorage.getItem(USED_KEY)||"{}");
   for(const k in used) if(Array.isArray(saved[k])) saved[k].forEach(w=>used[k].add(w)); }catch(e){}
 function saveUsed(){ try{ const o={}; for(const k in used) o[k]=[...used[k]]; localStorage.setItem(USED_KEY, JSON.stringify(o)); }catch(e){} }
-function pickWord(lvl, avoid){
-  let pool=parsed[lvl].filter(x=>!used[lvl].has(x.w) && !avoid.includes(x.w));
-  if(!pool.length){ used[lvl].clear(); pool=parsed[lvl].filter(x=>!avoid.includes(x.w)); }
-  const it=pool[Math.random()*pool.length|0]; used[lvl].add(it.w); saveUsed(); return {w:it.w,s:it.s};
+function pickWord(lvl, avoid, lang="en"){
+  const src = lang==="es" ? parsedEs[lvl] : parsed[lvl], key = lang==="es" ? "es:"+lvl : lvl;
+  let pool=src.filter(x=>!used[key].has(x.w) && !avoid.includes(x.w));
+  if(!pool.length){ used[key].clear(); pool=src.filter(x=>!avoid.includes(x.w)); }
+  const it=pool[Math.random()*pool.length|0]; used[key].add(it.w); saveUsed();
+  return lang==="es" ? {w:it.w,s:it.s,en:it.en,lang:"es"} : {w:it.w,s:it.s};
 }
 function beginTurn(){
-  const d=latest, i=d.turn, lvl=d.seats[i].lvl;
+  const d=latest, i=d.turn, lvl=d.seats[i].lvl, lang=seatLang(d.seats[i]);
   const count = Math.random() < LEVELS[lvl].double ? 2 : 1;
-  const items=[]; for(let k=0;k<count;k++) items.push(pickWord(lvl, items.map(x=>x.w)));
+  const items=[]; for(let k=0;k<count;k++) items.push(pickWord(lvl, items.map(x=>x.w), lang));
   const shield = LEVELS[lvl].el==="none" ? null : EL_KEYS[Math.random()*EL_KEYS.length|0];
   $("readyBtn").disabled=true;
-  speak(items[0].w);
+  speak(items[0].w,.8,lang);
   write({phase:"spelling", cur:{id:rid(), items, shield}}).catch(()=>{ const b=$("readyBtn"); if(b) b.disabled=false; });
 }
 
 function wordBlock(item,idx,total){
-  const blanked=esc(item.s).replace(new RegExp("\\b"+item.w+"\\b","i"),"<b>&nbsp;</b>");
+  const blanked=esc(item.s).replace(wordRe(item.w),"<b>&nbsp;</b>");
   return `<div class="wordbox">
     ${total>1?`<p class="jutsu">Word ${idx+1} of ${total}</p>`:""}
     <p class="sentence">${blanked}</p>
+    ${item.en?`<p class="meaning">In English: <b>${esc(item.en)}</b></p>`:""}
     <div class="seals" id="seals${idx}" aria-hidden="true"></div>
     <div class="row">
-      <input type="text" id="answer${idx}" ${TOUCH?'readonly inputmode="none"':""} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Spelling for word ${idx+1}">
+      <input type="text" id="answer${idx}" ${TOUCH?'readonly inputmode="none"':""} autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Spelling for word ${idx+1}" ${item.lang==="es"?'lang="es"':""}>
     </div>
+    ${item.lang==="es" && !TOUCH ? `<div class="row accents">${[..."áéíóúñü"].map(c=>`<button class="ghost small" data-acc="${c}" data-at="${idx}" aria-label="Type ${c}">${c}</button>`).join("")}</div>`:""}
     <div class="row">
       <button class="ghost" data-hear="${idx}">🔊 Hear word</button>
       <button class="ghost" data-sent="${idx}">Hear sentence</button>
@@ -2157,7 +2423,7 @@ function showSpelling(d){
         : `Wrong element = your jutsu backfires and you lose ${BACKFIRE} chakra.`}</p>
     </div>` : "";
   $("panel").innerHTML=`
-    <p class="jutsu">${LEVELS[lvl].label} · ${items.length>1?"Double jutsu! Spell both words":"Spell the word"}</p>
+    <p class="jutsu">${rankLabel(p)} · ${items.length>1?"Double jutsu! Spell both words":"Spell the word"}</p>
     <p class="who">${esc(seatName(d,i))}, charge your jutsu</p>
     ${picker}
     ${items.map((it,k)=>wordBlock(it,k,items.length)).join("")}
@@ -2189,8 +2455,9 @@ function showSpelling(d){
     inp.addEventListener("paste",e=>e.preventDefault());
   });
   const panel=$("panel");
-  panel.querySelectorAll("[data-hear]").forEach(b=>b.onclick=()=>speak(items[+b.dataset.hear].w));
-  panel.querySelectorAll("[data-sent]").forEach(b=>b.onclick=()=>speak(items[+b.dataset.sent].s,.9));
+  panel.querySelectorAll("[data-hear]").forEach(b=>b.onclick=()=>speak(items[+b.dataset.hear].w,.8,items[+b.dataset.hear].lang));
+  panel.querySelectorAll("[data-sent]").forEach(b=>b.onclick=()=>speak(items[+b.dataset.sent].s,.9,items[+b.dataset.sent].lang));
+  panel.querySelectorAll("[data-acc]").forEach(b=>b.onclick=()=>{ const k=+b.dataset.at, inp=$("answer"+k); if(!inp) return; setActive(k); inp.value+=b.dataset.acc; inp.dispatchEvent(new Event("input")); inp.focus(); });
   panel.querySelectorAll("[data-peek]").forEach(b=>b.onclick=()=>{
     const k=+b.dataset.peek; spell.peeked=true; b.disabled=true; sendTyping();
     const out=$("peekOut"+k);
@@ -2218,7 +2485,8 @@ function cast(){
 
   const i=d.turn, foe=1-i, lvl=d.seats[i].lvl;
   const stats=clone(d.stats), st=stats[i];
-  const wrong=items.filter((it,k)=>guesses[k].toLowerCase()!==it.w.toLowerCase()).map(x=>x.w);
+  const wrong=items.filter((it,k)=>plain(guesses[k])!==plain(it.w)).map(x=>x.w);
+  const accentFix=items.filter((it,k)=>plain(guesses[k])===plain(it.w) && guesses[k].toLowerCase()!==it.w.toLowerCase()).map(x=>x.w);
   const rightEl = shield ? picked===counterOf(shield) : true;
   const castEl = picked || EL_KEYS[Math.random()*EL_KEYS.length|0];
   const move = ELEMENTS[castEl].moves[Math.random()*3|0];
@@ -2240,7 +2508,7 @@ function cast(){
     status: over ? "over" : "playing",
     winner: over ? (hp[foe]===0 ? i : foe) : null,
     last:{id:rid(), by:i, outcome, move, color:ELEMENTS[castEl].c, dmg, self,
-          words:items.map(x=>x.w), guesses, wrong, picked:picked||null, shield:shield||null, peeked}
+          words:items.map(x=>x.w), guesses, wrong, accentFix, lang:items[0].lang||"en", picked:picked||null, shield:shield||null, peeked}
   });
 }
 
@@ -2295,7 +2563,7 @@ function renderWin(d){
     ${L?`<p class="tag">Final move: ${esc(seatName(d,L.by))}'s ${esc(L.move)}${L.outcome==="backfire"?" backfired":L.outcome==="hit"?` for ${L.dmg} damage`:" fizzled"}.</p>`:""}
     <div class="stats" style="margin-top:16px">
       ${[0,1].map(i=>{const s=d.stats[i], p=d.seats[i];return `<div class="stat">
-        <div style="font-weight:900;color:${p.color}">${esc(seatName(d,i))} · ${LEVELS[p.lvl].label}</div>
+        <div style="font-weight:900;color:${p.color}">${esc(seatName(d,i))} · ${rankLabel(p)}</div>
         <div><b>${s.hits}</b> landed · <b>${s.fizzles}</b> fizzled${LEVELS[p.lvl].el!=="none"?` · <b>${s.bonus}</b> super effective`:""}${LEVELS[p.lvl].el==="must"?` · <b>${s.backfires}</b> backfired`:""}</div>
         ${s.missed.length?`<div class="hint" style="margin-top:6px">Words to practice:</div><ul class="missed">${s.missed.map(m=>`<li>${esc(m)}</li>`).join("")}</ul>`:`<div class="hint" style="margin-top:6px">No misspellings. Perfect!</div>`}
       </div>`}).join("")}
@@ -2337,7 +2605,7 @@ function paintWatch(){
     const target=it.w.toLowerCase();
     let html="", allOk=true;
     [...typed].forEach((ch,j)=>{
-      const ok = target[j]===ch.toLowerCase(); if(!ok) allOk=false;
+      const ok = plain(target[j])===plain(ch); if(!ok) allOk=false;
       html+=`<span class="seal ${ok?"ok":"bad"}">${esc(ch.toUpperCase())}</span>`;
     });
     for(let j=typed.length;j<target.length;j++) html+=`<span class="seal empty">·</span>`;
